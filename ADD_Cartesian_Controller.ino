@@ -1,11 +1,27 @@
 
+/*
+*  ADD_Cartesian_Controllr.ino
+*  
+*  Created on: 31 Jul 2023
+*  Author: m.teerachot
+*  Tested with F030C6/C8, F091RC and G431CB
+*/
+
 #include "AccelStepper.h"
 
-AccelStepper mot1(PA4, PA5, PA6);
+// pin config -> enable, direction, pulse
+AccelStepper motv(PA4, PA5, PA6, false, false);
+AccelStepper moth(PA2, PA3, PA7, false, true);
 
-int callback1()
+int callback_v()
 {
-  mot1.callback();
+  motv.callback();
+  return 0;
+}
+
+int callback_h()
+{
+  moth.callback();
   return 0;
 }
 
@@ -23,50 +39,74 @@ void setup()
   Serial.setTimeout(200);
   
   /* motor init */
-  mot1.init(callback1);
+  motv.init(callback_v);
+  moth.init(callback_h);
 
-  /* home */
-  mot1.operate(mot1.ENABLE);  
-  mot1.direction(mot1.DIR_CCW);
+//#define goHome
+#ifdef goHome
+  motv.operate(motv.ENABLE);  
+  motv.direction(motv.DIR_CCW);
   while(digitalRead(PB0))
   {
-    mot1.start(1000);  
+    motv.start(1000);  
     delay(1);
   }
-  mot1.stop();      delay(500);
-  mot1.direction(mot1.DIR_CW);
-  mot1.start(500);  delay(300);  
-  mot1.stop();
-  mot1.operate(mot1.DISABLE);
-  Serial.println("Started");
+  motv.stop();      delay(500);
+  motv.direction(motv.DIR_CW);
+  motv.start(500);  delay(300);  
+  motv.stop();
+  motv.operate(motv.DISABLE);
+#endif
+  Serial.println("Preparing");
 }
 
-#define div_  1
+#define div_v 2
+#define div_h 2
 
-void loop() 
+void loop()
 {
+#define cartesian
+#ifdef cartesian
+  // get command
   while(1) 
   {
-    if (Serial.find('#') && Serial.find('#')) break;
-    digitalWrite(PC13, LOW);
+    if (Serial.find('#') && Serial.find('#')) 
+    {
+      Serial.println("Starting");
+      break;
+    }
+    digitalWrite(PC13, HIGH);
     delay(100);
   }
-  
-  digitalWrite(PC13, HIGH);
-  mot1.operate(mot1.ENABLE);
- 
-  mot1.moveTo(12000, 12000/div_, 12000/div_, 12000/div_);
-  Serial.print("Time: ");
-  Serial.println(mot1.timeout());
-  while(!mot1.finished());
+
+  // motor start
+  digitalWrite(PC13, LOW);
+  motv.operate(motv.ENABLE);
+  moth.operate(moth.ENABLE);
+
+  // >>>> travel forward
+  motv.moveTo(12000, 12000/div_v, 8000/div_v, 12000/div_v); // solf vel = 8000
+  moth.moveTo(12000, 12000/div_h, 8000/div_h, 12000/div_h);
+  // 
+  Serial.print("Vertical time:\t\t");   Serial.println(motv.timeout());
+  Serial.print("Horizontal time:\t");   Serial.println(moth.timeout());
+  // 
+  while(!motv.finished() || !moth.finished());
   delay(2000);
 
-  mot1.moveTo(-12000, 12000/div_, 12000/div_, 12000/div_);
-  Serial.print("Time: ");
-  Serial.println(mot1.timeout());
-  while(!mot1.finished());
+  // >>>> travel backward
+  motv.moveTo(-12000, 12000/div_v, 8000/div_v, 12000/div_v);
+  moth.moveTo(-12000, 12000/div_h, 8000/div_h, 12000/div_h);
+  // 
+  Serial.print("Vertical time:\t\t");   Serial.println(motv.timeout());
+  Serial.print("Horizontal time:\t");   Serial.println(moth.timeout());
+  // 
+  while(!motv.finished() || !moth.finished());
   delay(2000);
   
-  mot1.operate(mot1.DISABLE);
+  // motor stop
+  motv.operate(motv.DISABLE);
+  moth.operate(moth.DISABLE);
   Serial.println("\nReached\n");
+#endif
 }
