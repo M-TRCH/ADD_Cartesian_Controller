@@ -156,9 +156,24 @@ unsigned long AccelStepper::timeout()
   return TIMEOUT;
 }
 
+uint32_t AccelStepper::AccelDist()
+{
+  return ACCEL_DIS;  
+}
+
+uint32_t AccelStepper::DecelDist()
+{
+  return DECEL_DIS;  
+}
+
 void AccelStepper::stop()
 {
   PWM->pause();
+}
+
+void AccelStepper::start()
+{
+  PWM->resume();
 }
 
 void AccelStepper::start(float freq)
@@ -213,8 +228,5 @@ void AccelStepper::moveTo(int32_t pul, float freq, float accel, float decel)
   if (DECEL_ACTIVATE) TIMEOUT += forecastTime(FREQ_MIN, FREQ_GOAL, DECEL_GOAL);
   // set timeout factor = 105%
   TIMEOUT += TIMEOUT * 0.05;
-
-  /* start timer */
-  PWM->resume();
 }
    

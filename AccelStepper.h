@@ -55,7 +55,10 @@ class AccelStepper
     unsigned long forecastTime(unsigned long pul, float freq);
     unsigned long forecastTime(float u, float v, float accel);
     unsigned long timeout();
+    uint32_t AccelDist();
+    uint32_t DecelDist();
     void stop();
+    void start();
     void start(float freq);
     uint8_t finished();
     void moveTo(int32_t pul, float freq, float accel=-1, float decel=-1);
