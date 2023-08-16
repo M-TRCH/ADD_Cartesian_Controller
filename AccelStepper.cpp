@@ -100,42 +100,45 @@ void AccelStepper::callback_off()
 void AccelStepper::callback()
 {
   // callback funcction is for trajectory control
-  /* if the goal is reached */
-  if (PUL_CNT >= PUL_GOAL && CALLBACK_ACTIVATE) 
+  if (CALLBACK_ACTIVATE)
   {
-    POS_REACHED = 1;
-    callback_off();
-    PWM->pause();
-  }
-  /* if it's on travel, do it... */
-  else
-  {
-    PUL_CNT++;    
-    
-    // accel and decel generator
-    // there is a change in value for every pulse.
-    if (ACCEL_ACTIVATE && !ACCEL_REACHED)
+    /* if the goal is reached */
+    if (PUL_CNT >= PUL_GOAL) 
     {
-      if (FREQ_CNT >= FREQ_GOAL)
-        ACCEL_REACHED = 1;
-      else
-      {
-        // calculate and increase velocity
-        FREQ_INC = ACCEL_GOAL / FREQ_CNT;
-        FREQ_CNT += FREQ_INC;
-        setFreq(FREQ_CNT);
-      }
+      POS_REACHED = 1;
+      callback_off();
+      PWM->pause();
     }
-    else if (DECEL_ACTIVATE && !DECEL_REACHED && PUL_CNT >= PUL_GOAL - DECEL_DIS)
+    /* if it's on travel, do it... */
+    else
     {
-      if (FREQ_CNT <= FREQ_MIN)
-        DECEL_REACHED = 1;
-      else
+      PUL_CNT++;    
+      
+      // accel and decel generator
+      // there is a change in value for every pulse.
+      if (ACCEL_ACTIVATE && !ACCEL_REACHED)
       {
-        // calculate and decrease velocity
-        FREQ_DEC = DECEL_GOAL / FREQ_CNT;
-        FREQ_CNT -= FREQ_DEC;
-        setFreq(FREQ_CNT);
+        if (FREQ_CNT >= FREQ_GOAL)
+          ACCEL_REACHED = 1;
+        else
+        {
+          // calculate and increase velocity
+          FREQ_INC = ACCEL_GOAL / FREQ_CNT;
+          FREQ_CNT += FREQ_INC;
+          setFreq(FREQ_CNT);
+        }
+      }
+      else if (DECEL_ACTIVATE && !DECEL_REACHED && PUL_CNT >= PUL_GOAL - DECEL_DIS)
+      {
+        if (FREQ_CNT <= FREQ_MIN)
+          DECEL_REACHED = 1;
+        else
+        {
+          // calculate and decrease velocity
+          FREQ_DEC = DECEL_GOAL / FREQ_CNT;
+          FREQ_CNT -= FREQ_DEC;
+          setFreq(FREQ_CNT);
+        }
       }
     }
   }

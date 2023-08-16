@@ -2,7 +2,7 @@
 /*
 *  ADD_Cartesian_Controllr.ino
 *  
-*  Created on: 04 Aug 2023
+*  Created on: 15 Aug 2023
 *  Author: m.teerachot
 *  Tested with F030C6/C8, F091RC and G431CB
 */
@@ -20,7 +20,7 @@
 /* stepper motor control */
 #include "AccelStepper.h"
 
-// pin config -> enable, direction, pulse
+// pin config -> ena pin, dir pin, pul pin, ena invert, dir invert
 AccelStepper motv(PA4, PA5, PA6, false, false);
 AccelStepper moth(PA2, PA3, PA7, false, true);
 
@@ -33,7 +33,7 @@ uint8_t cmdIn;
 
 int getCmd()
 {
-  if (Serial.find('#') && Serial.find('#')) 
+  if (Serial.find('@')) 
   {
     int cmd = Serial.parseInt();
     return abs(cmd);
@@ -46,10 +46,20 @@ int getCmd()
 #define CONST_PMM     13.87283237 // constrant value between millimeter and pulse
 #define mmTopul(mm)   (float)mm * CONST_PMM;
 #define k_soft        2.375
-#define div 2
 bool fw_state = false;
 
-void indep_travel(int32_t pulv, float freqv, float accelv, float decelv, int32_t pulh, float freqh, float accelh, float decelh)
+// var for case (1, 2) 
+const float syncPos = 950;
+const float syncVel = syncPos / k_soft;
+
+// var for case (3, 4) 
+const float cartPos = 800;
+const float cartVel = cartPos / k_soft;
+const float cart_x[] = {608, -608};
+const float cart_y[] = {370, -160};
+
+// main movement func
+void indep_travel(int32_t pulv, float freqv, float accelv, float decelv, int32_t pulh, float freqh, float accelh, float decelh, bool lockv=false, bool lockh=false)
 {
   // motor start
   motv.operate(motv.ENABLE);
@@ -76,17 +86,17 @@ void indep_travel(int32_t pulv, float freqv, float accelv, float decelv, int32_t
   // waiting for finish 
   motv.start();
   moth.start();
-  Serial.println("\nCartesian starting");
+  Serial.println("\nCartesian starting...");
   while(!motv.finished() || !moth.finished());
   delay(500);
 
   // motor stop
-  motv.operate(motv.DISABLE);
-  moth.operate(moth.DISABLE);
+  if (!lockv)  motv.operate(motv.DISABLE);
+  if (!lockh)  moth.operate(moth.DISABLE);
   Serial.println("Goal reached\n");
 }
 
-void indep_travel_mm(float disv, float freqv, float accelv, float decelv, int32_t dish, float freqh, float accelh, float decelh)
+void indep_travel_mm(float disv, float freqv, float accelv, float decelv, int32_t dish, float freqh, float accelh, float decelh, bool lockv=false, bool lockh=false)
 {
   disv   = mmTopul(disv);
   freqv  = mmTopul(freqv);
@@ -96,7 +106,7 @@ void indep_travel_mm(float disv, float freqv, float accelv, float decelv, int32_
   freqh  = mmTopul(freqh);
   accelh = mmTopul(accelh);
   decelh = mmTopul(decelh);
-  indep_travel(disv, freqv, accelv, decelv, dish, freqh, accelh, decelh); 
+  indep_travel(disv, freqv, accelv, decelv, dish, freqh, accelh, decelh, lockv, lockh); 
 }
 
 void sync_travel(int32_t pul, float freq, float accel, float decel)
@@ -109,12 +119,13 @@ void sync_travel_mm(float dis, float freq, float accel, float decel)
   indep_travel_mm(dis, freq, accel, decel, dis, freq, accel, decel); 
 }
 
-void cartesian_travel(float x_target, float y_target, float freq, float accel, float decel)
+void cartesian_travel(float x_target, float y_target, float freq, float accel, float decel, float lock=false)
 {
   float resultant_vect = sqrt(pow(x_target, 2) + pow(y_target, 2)); 
   float x_unit = fabs(x_target) / resultant_vect;
   float y_unit = fabs(y_target) / resultant_vect;
-
+  float freq_cal = resultant_vect / k_soft; // >> testing 
+  
   Serial.println("0.Cartesian");
   Serial.print("  Resultant vector:\t");    Serial.println(resultant_vect);
   Serial.print("  Target position[x]:\t");  Serial.println(x_target);
@@ -124,8 +135,9 @@ void cartesian_travel(float x_target, float y_target, float freq, float accel, f
   
   indep_travel_mm
   (
-    y_target, freq * y_unit, accel * y_unit, decel * y_unit, 
-    x_target, freq * x_unit, accel * x_unit, decel * x_unit
+    y_target, freq_cal * y_unit, accel * y_unit, decel * y_unit, 
+    x_target, freq_cal * x_unit, accel * x_unit, decel * x_unit,
+    lock, lock
   );
 }
 
@@ -151,18 +163,7 @@ void setup()
 }
 
 void loop()
-{
-  /* var for case (1, 2) */
-  const float goalPos = 950;
-  const float goalVel = goalPos / k_soft;
-
-  /* var for case (3, 4) */
-  const float cartPos = 800;
-  const float cartVel = cartPos / k_soft;
-  const int p = 4;
-  const float goal_x[5] = {400, 950, 600, 300, 100};
-  const float goal_y[5] = {800, 950, 200, 500, 950};
-  
+{ 
   /* get command */
   cmdIn = getCmd();
   if (cmdIn)
@@ -172,33 +173,29 @@ void loop()
    
     switch (cmdIn)
     {
-      case 1:   // sync forward
+      case 1:   // fw sync
         if (!fw_state)
         {
           fw_state = true;
-          sync_travel_mm(goalPos, goalVel, 200, 200);
+          sync_travel_mm(syncPos, syncVel, 200, 200);
         }
         break;
-      case 2:   // sync backward
+      case 2:   // bw sync
         if (fw_state)
         {
           fw_state = false;
-          sync_travel_mm(-goalPos, goalVel, 200, 200);
+          sync_travel_mm(-syncPos, syncVel, 200, 200);
         }
         break; 
-      case 3:
-        if (!fw_state)
-        {
-          fw_state = true;
-          cartesian_travel(goal_x[p], goal_y[p], cartVel, 200, 200);
-        }
+      case 3:   // pick pos
+        cartesian_travel(cart_x[0], cart_y[0], cartVel, 200, 200, true);
         break;
-      case 4:
-        if (fw_state)
-        {
-          fw_state = false;
-          cartesian_travel(-goal_x[p], -goal_y[p], cartVel, 200, 200);
-        }
+      case 4:   // place pos
+        cartesian_travel(cart_x[1], cart_y[1], cartVel, 200, 200, true);
+        break;
+      case 5:   // home
+        motv.operate(motv.DISABLE);
+        moth.operate(moth.DISABLE);
         break;
       default:  // nothing
         return;

@@ -1,7 +1,7 @@
  /*
  *  AccelStepper.h
  *  
- *  Created on: 24 Jul 2023
+ *  Created on: 10 Aug 2023
  *  Author: m.teerachot
  *  Tested with F030C6/C8, F091RC and G431CB
  */
