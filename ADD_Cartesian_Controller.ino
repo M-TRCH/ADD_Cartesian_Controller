@@ -55,15 +55,36 @@ const float syncVel = syncPos / k_soft;
 // var for case (3, 4) 
 const float cartPos = 800;
 const float cartVel = cartPos / k_soft;
-const float cart_x[] = {608, -608};
-const float cart_y[] = {370, -160};
+const float cart_x[] = {592, -592, 0};
+const float cart_y[] = {153, -123, -30};
+
+// md meeting presentation
+int md_p = 0;
+//const float md_x[] = {600, 800, 200, 900};
+//const float md_y[] = {400, 700, 200, 100};
+const float md_x[] = {600, 200, -600, 700, -900};
+const float md_y[] = {400, 300, -500, -100, -100};
+
+void operate_all(bool enable)
+{
+  if (enable)
+  {
+    motv.operate(motv.ENABLE);
+    moth.operate(moth.ENABLE);   
+  }
+  else 
+  {
+    motv.operate(motv.DISABLE);
+    moth.operate(moth.DISABLE);
+  }
+}
 
 // main movement func
 void indep_travel(int32_t pulv, float freqv, float accelv, float decelv, int32_t pulh, float freqh, float accelh, float decelh, bool lockv=false, bool lockh=false)
 {
   // motor start
-  motv.operate(motv.ENABLE);
-  moth.operate(moth.ENABLE);
+//  motv.operate(motv.ENABLE);
+//  moth.operate(moth.ENABLE);
 
   // action
   motv.moveTo(pulv, freqv, accelv, decelv); 
@@ -124,7 +145,7 @@ void cartesian_travel(float x_target, float y_target, float freq, float accel, f
   float resultant_vect = sqrt(pow(x_target, 2) + pow(y_target, 2)); 
   float x_unit = fabs(x_target) / resultant_vect;
   float y_unit = fabs(y_target) / resultant_vect;
-  float freq_cal = resultant_vect / k_soft; // >> testing 
+  float freq_cal = resultant_vect / 1.8; //k_soft; // >> testing 
   
   Serial.println("0.Cartesian");
   Serial.print("  Resultant vector:\t");    Serial.println(resultant_vect);
@@ -156,8 +177,7 @@ void setup()
   /* motor init */
   motv.init(callback_v);
   moth.init(callback_h);
-  motv.operate(motv.DISABLE);
-  moth.operate(moth.DISABLE);
+  operate_all(false);
   
   Serial.println("Motor is ready!\n");
 }
@@ -188,14 +208,28 @@ void loop()
         }
         break; 
       case 3:   // pick pos
+        motv.operate(motv.ENABLE);
+        moth.operate(moth.ENABLE);
         cartesian_travel(cart_x[0], cart_y[0], cartVel, 200, 200, true);
         break;
       case 4:   // place pos
-        cartesian_travel(cart_x[1], cart_y[1], cartVel, 200, 200, true);
+        cartesian_travel(cart_x[1], cart_y[1], cartVel, 200, 200, false);
         break;
-      case 5:   // home
-        motv.operate(motv.DISABLE);
-        moth.operate(moth.DISABLE);
+      case 5:   // disable
+        operate_all(false);
+        break;
+      case 6:
+        operate_all(true);
+        #define g 1.5
+//        cartesian_travel(md_x[md_p], md_y[md_p], cartVel, 200, 200, true);
+//        delay(1000);
+//        cartesian_travel(-md_x[md_p], -md_y[md_p], cartVel, 200, 200, false);
+
+        for (int p=0; p<5; p++)
+        {
+           cartesian_travel(md_x[p], md_y[p], cartVel, 200*g, 200*g, true);
+        }   
+        operate_all(false);
         break;
       default:  // nothing
         return;
