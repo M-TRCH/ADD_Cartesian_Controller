@@ -11,10 +11,12 @@
 /* overall system */
 #define UART1_RX_PIN    PA10
 #define UART1_TX_PIN    PA9
-#define UART1_BAUDRATE  9600
+#define UART1_BAUDRATE  250000
 #define UART1_TIMEOUT   200
 #define TRAJ_LED_PIN    PC13
 #define TRAJ_LED(s)     digitalWrite(TRAJ_LED_PIN, s)
+#define LIM_H_PIN       PB0
+#define LIM_H           !digitalRead(LIM_H_PIN)
 
 ///////////////////////////////////////////////////////////////////////////////
 /* stepper motor control */
@@ -29,92 +31,173 @@ int callback_h()  { moth.callback();  return 0; }
 
 ///////////////////////////////////////////////////////////////////////////////
 /* serial interface */
-uint8_t cmdIn;
+#define EndPack           '&'
+#define Header            '@'
+#define MsgReturnParam    '0'
+#define MsgGoalReached    '1'
+int8_t cmdIn;
 
 int getCmd()
 {
-  if (Serial.find('@')) 
+  if (Serial.find(Header)) 
   {
     int cmd = Serial.parseInt();
     return abs(cmd);
   }
-  return 0;
+  return -1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 /* cartesian */
-#define CONST_PMM     13.87283237 // constrant value between millimeter and pulse
-#define mmTopul(mm)   (float)mm * CONST_PMM;
-#define k_soft        2.375
-bool fw_state = false;
+#define CONST_PMM       13.87283237 // constant value between millimeter and pulse
+#define mmTopul(mm)     (float)mm * CONST_PMM;
+#define M2M_x           120.0   // vertical module to module
+#define M2M_y           215.0   // horizontal module to module
+#define k_pv            1.8
+#define k_va            1.25
+float relative_x = 0;
+float relative_y = 0;
+const float sys_x[] = {0, 380,   0, 165}; 
+const float sys_y[] = {0,   5, 200, 200};
+// <system position>
+// index 0: home position 
+// index 1: first module
+// index 2: right basket
+// index 3: left basket
+const float org_x = 380;  // follow system position
+const float org_y = 5;
+int set_row = 1, set_col = 1, pointIn;
 
-// var for case (1, 2) 
-const float syncPos = 950;
-const float syncVel = syncPos / k_soft;
+float toAbs_x(float refx)
+{ 
+  float absx = refx - relative_x;
+  relative_x = refx;
+  return absx;
+}
 
-// var for case (3, 4) 
-const float cartPos = 800;
-const float cartVel = cartPos / k_soft;
-const float cart_x[] = {592, -592, 0};
-const float cart_y[] = {153, -123, -30};
+float toAbs_y(float refy)
+{ 
+  float absy = refy - relative_y;
+  relative_y = refy;
+  return absy;
+}
 
-// md meeting presentation
-int md_p = 0;
-//const float md_x[] = {600, 800, 200, 900};
-//const float md_y[] = {400, 700, 200, 100};
-const float md_x[] = {600, 200, -600, 700, -900};
-const float md_y[] = {400, 300, -500, -100, -100};
-
-void operate_all(bool enable)
+void operate(int axis, int state)
 {
-  if (enable)
+  switch (state)
   {
-    motv.operate(motv.ENABLE);
-    moth.operate(moth.ENABLE);   
+    // disable
+    case 0:
+      if (axis == 0 || axis == 2) 
+      { 
+        motv.operate(motv.DISABLE);
+        Serial.println("Motor: vertical disable");
+      }
+      if (axis == 1 || axis == 2) 
+      {
+        moth.operate(moth.DISABLE);
+        Serial.println("Motor: horizontal disable");
+      }
+      break;
+    // enable
+    case 1:
+      if (axis == 0 || axis == 2) 
+      { 
+        motv.operate(motv.ENABLE);
+        Serial.println("Motor: vertical enable");
+      } 
+      if (axis == 1 || axis == 2) 
+      {
+        moth.operate(moth.ENABLE);
+        Serial.println("Motor: horizontal enable");
+      }     
+      break;
+    // home
+    case 2:
+      if (axis == 0 || axis == 2) 
+      {
+        motv.operate(motv.DISABLE);
+        Serial.println("Motor: vertical got home");
+      }
+      if (axis == 1 || axis == 2) 
+      {
+        horizontal_home();
+      }
+      break;
   }
-  else 
+}
+
+void verticalEndlessDrive(float freq)
+{
+  if (freq == 0)
   {
-    motv.operate(motv.DISABLE);
-    moth.operate(moth.DISABLE);
+    motv.stop();
+    // return message 
+    Serial.write(Header);
+    Serial.write(MsgGoalReached);
+    Serial.write(EndPack);
+  }
+  else
+  {
+    if (freq > 0) motv.direction(motv.DIR_CCW);
+    else          motv.direction(motv.DIR_CW);  
+    motv.start(freq);  
+  }
+}
+
+void horizontalEndlessDrive(float freq)
+{
+  if (freq == 0)
+  {
+    moth.stop();
+    // return message 
+    Serial.write(Header);
+    Serial.write(MsgGoalReached);
+    Serial.write(EndPack);
+  }
+  else
+  {
+    if (freq > 0) moth.direction(moth.DIR_CCW);
+    else          moth.direction(moth.DIR_CW);  
+    moth.start(freq);  
   }
 }
 
 // main movement func
 void indep_travel(int32_t pulv, float freqv, float accelv, float decelv, int32_t pulh, float freqh, float accelh, float decelh, bool lockv=false, bool lockh=false)
 {
-  // motor start
-//  motv.operate(motv.ENABLE);
-//  moth.operate(moth.ENABLE);
-
   // action
-  motv.moveTo(pulv, freqv, accelv, decelv); 
-  moth.moveTo(pulh, freqh, accelh, decelh); 
+  if (pulv != 0)  motv.moveTo(pulv, freqv, accelv, decelv); 
+  if (pulh != 0)  moth.moveTo(pulh, freqh, accelh, decelh); 
   int32_t difDistV = abs(pulv) - motv.AccelDist() - motv.DecelDist();
   int32_t difDistH = abs(pulh) - moth.AccelDist() - moth.DecelDist();
-  Serial.println("1.Vertical");
+
+  Serial.write(Header);
+  Serial.write(MsgReturnParam);
+  Serial.println("<Vertical>");
   Serial.print("  Operating time:\t");    Serial.println(motv.timeout());
   Serial.print("  Total distance:\t");    Serial.println(pulv);
   Serial.print("  Accel distance:\t");    Serial.println(motv.AccelDist());
   Serial.print("  Decel distance:\t");    Serial.println(motv.DecelDist());
   Serial.print("  Diff distance:\t");     Serial.println(difDistV);
-  Serial.println("2.Horizontal");
+  Serial.println("<Horizontal>");
   Serial.print("  Operating time:\t");    Serial.println(moth.timeout());
   Serial.print("  Total distance:\t");    Serial.println(pulh);
   Serial.print("  Accel distance:\t");    Serial.println(moth.AccelDist());
   Serial.print("  Decel distance:\t");    Serial.println(moth.DecelDist());
   Serial.print("  Diff distance:\t");     Serial.println(difDistH);
+  Serial.write(EndPack);
   
   // waiting for finish 
-  motv.start();
-  moth.start();
-  Serial.println("\nCartesian starting...");
-  while(!motv.finished() || !moth.finished());
-  delay(500);
+  if (pulv != 0)  motv.start();
+  if (pulh != 0)  moth.start();
+  Serial.println("Cartesian: moving");
+  while((pulv != 0 && !motv.finished()) || (pulh != 0 && !moth.finished()));
 
   // motor stop
   if (!lockv)  motv.operate(motv.DISABLE);
   if (!lockh)  moth.operate(moth.DISABLE);
-  Serial.println("Goal reached\n");
+  Serial.println("Cartesian: goal reached");
 }
 
 void indep_travel_mm(float disv, float freqv, float accelv, float decelv, int32_t dish, float freqh, float accelh, float decelh, bool lockv=false, bool lockh=false)
@@ -140,32 +223,79 @@ void sync_travel_mm(float dis, float freq, float accel, float decel)
   indep_travel_mm(dis, freq, accel, decel, dis, freq, accel, decel); 
 }
 
-void cartesian_travel(float x_target, float y_target, float freq, float accel, float decel, float lock=false)
+void cartesian_travel(float x_target, float y_target, float lock=false)
 {
   float resultant_vect = sqrt(pow(x_target, 2) + pow(y_target, 2)); 
   float x_unit = fabs(x_target) / resultant_vect;
   float y_unit = fabs(y_target) / resultant_vect;
-  float freq_cal = resultant_vect / 1.8; //k_soft; // >> testing 
-  
-  Serial.println("0.Cartesian");
-  Serial.print("  Resultant vector:\t");    Serial.println(resultant_vect);
-  Serial.print("  Target position[x]:\t");  Serial.println(x_target);
-  Serial.print("  Target position[y]:\t");  Serial.println(y_target);
+  float freq_cal = resultant_vect / k_pv; 
+  float accel_cal = freq_cal / k_va;
+
+  Serial.write(Header);
+  Serial.write(MsgReturnParam);
+  Serial.println("<Cartesian>");
+  Serial.print("  Resultant vector:\t");    Serial.println((int)resultant_vect);
+  Serial.print("  Target position[x]:\t");  Serial.println((int)x_target);
+  Serial.print("  Target position[y]:\t");  Serial.println((int)y_target);
   Serial.print("  Unit vector[x]:\t");      Serial.println(x_unit);
   Serial.print("  Unit vector[y]:\t");      Serial.println(y_unit);
+  Serial.write(EndPack);
   
   indep_travel_mm
   (
-    y_target, freq_cal * y_unit, accel * y_unit, decel * y_unit, 
-    x_target, freq_cal * x_unit, accel * x_unit, decel * x_unit,
+    y_target, freq_cal * y_unit, accel_cal * y_unit, accel_cal * y_unit, 
+    x_target, freq_cal * x_unit, accel_cal * x_unit, accel_cal * x_unit,
     lock, lock
   );
+
+  // return message 
+  Serial.write(Header);
+  Serial.write(MsgGoalReached);
+  Serial.write(EndPack);
+}
+
+void cartesian_relative(float x_target, float y_target, float lock=false)
+{
+  x_target = toAbs_x(x_target);
+  y_target = toAbs_y(y_target);
+  cartesian_travel(x_target, y_target, lock);
+}
+
+void horizontal_home()
+{
+  if (!LIM_H)
+  {
+    // motor config
+    const float freq = 1000;
+
+    // motor start
+    moth.operate(moth.ENABLE);
+    moth.direction(moth.DIR_CCW);
+    moth.start(freq);
+    Serial.println("Motor: horizontal homing");
+    
+    // waiting for finish 
+    while(!LIM_H);  
+    moth.stop();
+    
+    moth.operate(moth.DISABLE);
+    Serial.println("Motor: horizontal got home");
+  }
+  else 
+  {
+    moth.operate(moth.DISABLE);
+    Serial.println("Motor: horizontal got home");
+  }    
+  relative_x = 0;
+  relative_y = 0;
 }
 
 void setup() 
 {
   /* sys pin */
   pinMode(TRAJ_LED_PIN, OUTPUT);
+  pinMode(LIM_H_PIN, INPUT_PULLUP);
+  
   TRAJ_LED(LOW);
    
   /* uart */ 
@@ -177,62 +307,60 @@ void setup()
   /* motor init */
   motv.init(callback_v);
   moth.init(callback_h);
-  operate_all(false);
-  
-  Serial.println("Motor is ready!\n");
+  operate(2, 0);    // cartesian disable
+
+  Serial.println("System: <Cartesian>");
+  Serial.println("System: ready");
 }
 
 void loop()
 { 
   /* get command */
   cmdIn = getCmd();
-  if (cmdIn)
+  if (cmdIn + 1)
   {
-    Serial.print("Get command: ");
-    Serial.println(cmdIn);
-   
+    Serial.print("System: command[");
+    Serial.print(cmdIn);
+    Serial.println("]");
+     
     switch (cmdIn)
     {
-      case 1:   // fw sync
-        if (!fw_state)
-        {
-          fw_state = true;
-          sync_travel_mm(syncPos, syncVel, 200, 200);
-        }
+      case 0:
+        operate(Serial.parseInt(), 0);
         break;
-      case 2:   // bw sync
-        if (fw_state)
-        {
-          fw_state = false;
-          sync_travel_mm(-syncPos, syncVel, 200, 200);
-        }
+      case 1:
+        operate(Serial.parseInt(), 1);
         break; 
-      case 3:   // pick pos
-        motv.operate(motv.ENABLE);
-        moth.operate(moth.ENABLE);
-        cartesian_travel(cart_x[0], cart_y[0], cartVel, 200, 200, true);
+      case 2:  
+        operate(Serial.parseInt(), 2);
         break;
-      case 4:   // place pos
-        cartesian_travel(cart_x[1], cart_y[1], cartVel, 200, 200, false);
+      case 3:  
+        pointIn = Serial.parseInt();
+        cartesian_relative(sys_x[pointIn], sys_y[pointIn], true);
+        break;    
+      case 4:  
+        verticalEndlessDrive(Serial.parseInt());
         break;
-      case 5:   // disable
-        operate_all(false);
-        break;
+      case 5: 
+        horizontalEndlessDrive(Serial.parseInt());
       case 6:
-        operate_all(true);
-        #define g 1.5
-//        cartesian_travel(md_x[md_p], md_y[md_p], cartVel, 200, 200, true);
-//        delay(1000);
-//        cartesian_travel(-md_x[md_p], -md_y[md_p], cartVel, 200, 200, false);
-
-        for (int p=0; p<5; p++)
-        {
-           cartesian_travel(md_x[p], md_y[p], cartVel, 200*g, 200*g, true);
-        }   
-        operate_all(false);
+        set_row = Serial.parseInt();
+        Serial.print("Cartesian: row ");
+        Serial.println(set_row);
         break;
-      default:  // nothing
-        return;
+      case 7:
+        set_col = 7 - Serial.parseInt();
+        Serial.print("Cartesian: column ");
+        Serial.println(set_col);
+        break;
+      case 8:
+        cartesian_relative(org_x + M2M_x * (set_col-1), org_y + M2M_y * (set_row-1), true);
+        break;
+      case 9:
+        relative_x = 0;
+        relative_y = 0;
+        Serial.println("Cartesian: zero relative value");
+        break;
     }
     cmdIn = 0;  // reset command
   }
