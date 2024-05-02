@@ -1,9 +1,9 @@
  /*
  *  AccelStepper.h
  *  
- *  Created on: 10 Aug 2023
- *  Author: m.teerachot
- *  Tested with F030C6/C8, F091RC and G431CB
+ *  Created on: 21 Feb 2024
+ *  Author: M.Teerachot
+ *  Tested with STM32G431CB
  */
 
 #ifndef ACCELSTEPPER_H
@@ -14,27 +14,42 @@
 class AccelStepper
 {
   private:
-    /* physical pin */
+    /* Physical pin, common stepper motor drives have three section controls: enable, direction, and pulse. */
     uint8_t ENA_PIN, DIR_PIN, PUL_PIN; 
-    /* timer */
+    /* Timer, all about the timer is based on stm32 architecture. */
     TIM_TypeDef *INS;
     uint32_t CH;
     HardwareTimer *PWM;
-    /* trajectory control */
-    uint16_t FREQ_MIN = 2;                // can be changed as appropriate     
-    uint32_t FREQ_MAX = 200000;           // variable use the hertz unit.
-    // position
-    volatile uint32_t PUL_CNT, PUL_GOAL;
-    // velocity
-    volatile float FREQ_CNT, FREQ_INC, FREQ_DEC;
+    /* Trajectory control, point to point moition consists of position, velocity, accelaration and jerk. */
+    /* constant values */
+    uint16_t FREQ_MIN = 200;        // Can be changed to suit your system.     
+    uint32_t FREQ_MAX = 200000;     // Variable use the hertz unit.
+    /* CNT: counting value
+     * INC: increase value
+     * GOAL: set target position 
+     * DIS: calculation distance
+     */ 
+    volatile uint8_t MOTION_STATE;
+    /* 1. position */
+    volatile uint32_t PUL_CNT; 
+    volatile uint32_t PUL_GOAL;
+    /* 2. velocity */
+    volatile float FREQ_CNT, FREQ_INC;
     volatile uint32_t FREQ_GOAL;
-    // acceleration
-    volatile uint32_t ACCEL_DIS, DECEL_DIS, ACCEL_GOAL, DECEL_GOAL; 
-    /* flag */
-    bool POS_REACHED, ACCEL_REACHED, DECEL_REACHED; 
-    bool ACCEL_ACTIVATE, DECEL_ACTIVATE, CALLBACK_ACTIVATE;
-    /* feedback */
-    unsigned long TIMEOUT;
+    /* 3. acceleration */
+    volatile float ACCEL_CNT, ACCEL_INC;
+    volatile int32_t ACCEL_GOAL; 
+    volatile uint32_t ACCEL_DIS;    // Total distance of states 1, 2, and 3 (of 7).
+    /* 4. jerk */ 
+    volatile uint32_t JERK_GOAL;  
+    volatile uint32_t JERK_VEL;     // The value of velocity at any jerk value.
+    
+    /* flag variables */
+    bool POS_REACHED, ACCEL_REACHED, DECEL_REACHED, JERK_REACHED[4]; 
+    bool ACCEL_ACTIVATE, JERK_ACTIVATE;
+    bool CALLBACK_ACTIVATE; 
+    /* feedback variables */
+    unsigned long TIMEOUT;  
   
   public:
     AccelStepper(uint8_t ena, uint8_t dir, uint8_t pul, bool ena_invert=false, bool dir_invert=false);
@@ -47,22 +62,22 @@ class AccelStepper
     void setPrd_ms(unsigned long t);
     void setFreq(float freq);
     void setFreq_k(float freq);
-    void operate(bool ena, uint16_t t=500);
-    void direction(bool dir);
-    void callback_on();
-    void callback_off();
+    void operate(bool ena, uint16_t t=0);
+    void setDir(bool dir);
+    void callbackEnable();
+    void callbackDisable();
     void callback();
-    unsigned long forecastTime(unsigned long pul, float freq);
-    unsigned long forecastTime(float u, float v, float accel);
+    unsigned long calRunningTime(unsigned long pul, float freq);
+    unsigned long calRunningTime(float u, float v, float accel);
     unsigned long timeout();
-    uint32_t AccelDist();
-    uint32_t DecelDist();
+    uint32_t accelDistance();
     void stop();
     void start();
     void start(float freq);
     uint8_t finished();
-    void moveTo(int32_t pul, float freq, float accel=-1, float decel=-1);
-    
+    void moveTo(int32_t pul, float freq, float accel, float jerk);
+    void trajectoryGraphPrint();
+    void simulate();
 };
 
 #endif /* ACCELSTEPPER_H */
